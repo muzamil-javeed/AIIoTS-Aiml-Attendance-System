@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
@@ -6,13 +7,19 @@ from streamlit_js_eval import get_geolocation
 from PIL import Image
 import io
 import pymongo
+from dotenv import load_dotenv
+# Load environment variables from .env file
+load_dotenv()
+
+# Get the connection string from environment variables
+connection_string = os.getenv("MONGODB_CONNECTION_STRING")
 
 # Define the allowed location coordinates (latitude, longitude)
 ALLOWED_LOCATION = (34.1011, 74.8090)  # Example coordinates
 MAX_DISTANCE_KM = 10.0  # Maximum allowed distance in kilometers
 
 # Connect to MongoDB
-client = pymongo.MongoClient("mongodb://localhost:27017/")
+client = pymongo.MongoClient(connection_string)
 db = client["attendance_db"]
 attendance_collection = db["attendance"]
 
