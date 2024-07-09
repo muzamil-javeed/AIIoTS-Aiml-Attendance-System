@@ -8,6 +8,8 @@ from PIL import Image
 import io
 import pymongo
 from dotenv import load_dotenv
+import pytz
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -23,6 +25,12 @@ client = pymongo.MongoClient(connection_string)
 db = client["attendance_db"]
 attendance_collection = db["attendance"]
 
+# Define IST timezone
+IST = pytz.timezone('Asia/Kolkata')
+
+def get_current_ist_time():
+    return datetime.now(IST)
+
 def save_image(img):
     image = Image.open(img)
     image = image.resize((150, 150))  # Resize to 150x150 pixels
@@ -37,13 +45,13 @@ def log_arrival(name, date, photo):
     if attendance_collection.find_one({"Name": name, "Date": query_date}):
         return False, "Arrival already logged for today."
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    current_time = get_current_ist_time()
     photo_data = save_image(photo)
 
     new_entry = {
         'Name': name,
         'Date': query_date,
-        'Arrival Time': datetime.now().strftime('%I:%M %p'),
+        'Arrival Time': current_time.strftime('%I:%M %p'),
         'Leaving Time': None,
         'Hours Present': None,
         'Arrival Photo': photo_data,
@@ -64,7 +72,7 @@ def log_leaving(name, date, photo):
     if entry['Leaving Time'] is not None:
         return False, "Leaving time already logged for today."
 
-    leaving_time = datetime.now()
+    leaving_time = get_current_ist_time()
     arrival_time = datetime.strptime(entry['Arrival Time'], '%I:%M %p')
     # Combine the date and time for both arrival and leaving
     date_obj = datetime.combine(date, datetime.min.time())
@@ -82,7 +90,6 @@ def log_leaving(name, date, photo):
     # Calculate hours present
     hours_present = round(time_diff.total_seconds() / 3600, 2)
 
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     photo_data = save_image(photo)
 
     attendance_collection.update_one(
