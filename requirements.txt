@@ -1,0 +1,5 @@
+streamlit==1.36.0
+pandas==2.2.2
+geopy==2.4.1
+streamlit-js-eval==0.1.7
+timedelta==2020.12.3
