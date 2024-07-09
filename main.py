@@ -4,58 +4,61 @@ from datetime import datetime, date, timedelta
 from geopy.distance import geodesic
 from streamlit_js_eval import get_geolocation
 from PIL import Image
-import os
+import io
+import pymongo
 
 # Define the allowed location coordinates (latitude, longitude)
 ALLOWED_LOCATION = (34.1011, 74.8090)  # Example coordinates
 MAX_DISTANCE_KM = 10.0  # Maximum allowed distance in kilometers
 
-def save_image(img, name, timestamp, action):
-    folder = "images"
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-    filename = f"{folder}/{name}_{action}_{timestamp}.png"
-    
-    # Save the image with smaller size
+# Connect to MongoDB
+client = pymongo.MongoClient("mongodb://localhost:27017/")
+db = client["attendance_db"]
+attendance_collection = db["attendance"]
+
+def save_image(img):
     image = Image.open(img)
     image = image.resize((150, 150))  # Resize to 150x150 pixels
-    image.save(filename)
-    
-    return filename
+    img_byte_arr = io.BytesIO()
+    image.save(img_byte_arr, format='PNG')
+    return img_byte_arr.getvalue()
 
-def log_arrival(df, name, date, photo, filename='attendance.xlsx'):
-    if not df[(df['Name'] == name) & (df['Date'] == date)].empty:
+def log_arrival(name, date, photo):
+    # Convert date to datetime for MongoDB query
+    query_date = datetime.combine(date, datetime.min.time())
+    
+    if attendance_collection.find_one({"Name": name, "Date": query_date}):
         return False, "Arrival already logged for today."
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    photo_path = save_image(photo, name, timestamp, "arrival")
+    photo_data = save_image(photo)
 
-    new_entry = pd.DataFrame([{
+    new_entry = {
         'Name': name,
-        'Date': date,
+        'Date': query_date,
         'Arrival Time': datetime.now().strftime('%I:%M %p'),
         'Leaving Time': None,
         'Hours Present': None,
-        'Arrival Photo': photo_path,
+        'Arrival Photo': photo_data,
         'Leaving Photo': None
-    }])
+    }
 
-    df = pd.concat([df, new_entry], ignore_index=True)
-    df.to_excel(filename, index=False)
+    attendance_collection.insert_one(new_entry)
     return True, "Arrival logged successfully."
 
-def log_leaving(df, name, date, photo, filename='attendance.xlsx'):
-    entries = df[(df['Name'] == name) & (df['Date'] == date)]
-    if entries.empty:
+def log_leaving(name, date, photo):
+    # Convert date to datetime for MongoDB query
+    query_date = datetime.combine(date, datetime.min.time())
+    
+    entry = attendance_collection.find_one({"Name": name, "Date": query_date})
+    if not entry:
         return False, "Arrival not logged for today."
 
-    latest_entry = entries.iloc[-1]
-    if not pd.isna(latest_entry['Leaving Time']):
+    if entry['Leaving Time'] is not None:
         return False, "Leaving time already logged for today."
 
-    idx = latest_entry.name
     leaving_time = datetime.now()
-    arrival_time = datetime.strptime(df.at[idx, 'Arrival Time'], '%I:%M %p')
+    arrival_time = datetime.strptime(entry['Arrival Time'], '%I:%M %p')
     # Combine the date and time for both arrival and leaving
     date_obj = datetime.combine(date, datetime.min.time())
     arrival_datetime = date_obj.replace(hour=arrival_time.hour, minute=arrival_time.minute)
@@ -73,21 +76,25 @@ def log_leaving(df, name, date, photo, filename='attendance.xlsx'):
     hours_present = round(time_diff.total_seconds() / 3600, 2)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    photo_path = save_image(photo, name, timestamp, "leaving")
+    photo_data = save_image(photo)
 
-    df.at[idx, 'Leaving Time'] = leaving_time.strftime('%I:%M %p')
-    df.at[idx, 'Hours Present'] = hours_present
-    df.at[idx, 'Leaving Photo'] = photo_path
-    df.to_excel(filename, index=False)
+    attendance_collection.update_one(
+        {"_id": entry["_id"]},
+        {
+            "$set": {
+                'Leaving Time': leaving_time.strftime('%I:%M %p'),
+                'Hours Present': hours_present,
+                'Leaving Photo': photo_data
+            }
+        }
+    )
     return True, "Leaving time logged successfully."
 
-def load_attendance(filename='attendance.xlsx'):
-    try:
-        df = pd.read_excel(filename)
-        df['Date'] = pd.to_datetime(df['Date']).dt.date
-    except FileNotFoundError:
-        df = pd.DataFrame(columns=['Name', 'Date', 'Arrival Time', 'Leaving Time', 'Hours Present', 'Arrival Photo', 'Leaving Photo'])
-    return df
+def load_attendance():
+    entries = list(attendance_collection.find())
+    for entry in entries:
+        entry['Date'] = entry['Date'].strftime('%Y-%m-%d')
+    return pd.DataFrame(entries)
 
 def is_within_allowed_location(lat, lon):
     user_location = (lat, lon)
@@ -95,6 +102,7 @@ def is_within_allowed_location(lat, lon):
     return distance <= MAX_DISTANCE_KM
 
 def calculate_attendance_stats(df, employee, month):
+    df['Date'] = pd.to_datetime(df['Date'])
     if month != 'All':
         df = df[df['Date'].dt.strftime('%B %Y') == month]
     
@@ -180,8 +188,8 @@ def attendance_logging_page():
     if 'df' not in st.session_state:
         st.session_state.df = load_attendance()
 
-    # Check if the employee has any entry for today
-    today_entries = st.session_state.df[(st.session_state.df['Name'] == selected_employee) & (st.session_state.df['Date'] == current_date)]
+    # Filter for today's entries for the selected employee
+    today_entries = st.session_state.df[(st.session_state.df['Name'] == selected_employee) & (st.session_state.df['Date'] == current_date.strftime('%Y-%m-%d'))]
 
     if today_entries.empty:
         # No entry for today, show arrival log button and camera input
@@ -190,7 +198,7 @@ def attendance_logging_page():
 
         if img_file is not None:
             if st.button('Log Arrival Time'):
-                success, message = log_arrival(st.session_state.df, selected_employee, current_date, img_file)
+                success, message = log_arrival(selected_employee, current_date, img_file)
                 if success:
                     st.session_state.df = load_attendance()  # Reload the updated dataframe
                     st.success(message)
@@ -209,7 +217,7 @@ def attendance_logging_page():
 
             if img_file is not None:
                 if st.button('Log Leaving Time'):
-                    success, message = log_leaving(st.session_state.df, selected_employee, current_date, img_file)
+                    success, message = log_leaving(selected_employee, current_date, img_file)
                     if success:
                         st.session_state.df = load_attendance()  # Reload the updated dataframe
                         st.success(message)
@@ -220,8 +228,12 @@ def attendance_logging_page():
             # Both arrival and leaving times are logged
             st.info(f"You have already logged both arrival ({latest_entry['Arrival Time']}) and leaving ({latest_entry['Leaving Time']}) times for today.")
 
-    st.write("Current Attendance Records:")
-    st.dataframe(st.session_state.df)
+    # Display all employees' attendance records for today without ID, Arrival Photo, and Leaving Photo
+    st.write("Current Attendance Records for Today:")
+    today_all_entries = st.session_state.df[st.session_state.df['Date'] == current_date.strftime('%Y-%m-%d')]
+    if not today_all_entries.empty:
+        today_all_entries = today_all_entries.drop(columns=['_id', 'Arrival Photo', 'Leaving Photo'])
+    st.dataframe(today_all_entries)
 
 if __name__ == '__main__':
     main()
