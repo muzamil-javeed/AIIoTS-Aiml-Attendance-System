@@ -1,3 +1,4 @@
+# app.py
 import os
 import streamlit as st
 import pandas as pd
@@ -9,6 +10,7 @@ import io
 import pymongo
 from dotenv import load_dotenv
 import pytz
+import admin  # Import the admin login script
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,7 +20,7 @@ connection_string = os.getenv("MONGODB_CONNECTION_STRING")
 
 # Define the allowed location coordinates (latitude, longitude)
 ALLOWED_LOCATION = (34.1008979, 74.8099825)  # Example coordinates
-MAX_DISTANCE_KM = 10 # Maximum allowed distance in kilometers
+MAX_DISTANCE_KM = 0.5  # Maximum allowed distance in kilometers
 
 # Connect to MongoDB
 client = pymongo.MongoClient(connection_string)
@@ -168,15 +170,6 @@ def attendance_stats_page():
         mime="text/csv"
     )
 
-def main():
-    st.sidebar.title('Navigation')
-    page = st.sidebar.radio('Go to', ['Attendance Logging', 'Attendance Statistics'])
-    
-    if page == 'Attendance Logging':
-        attendance_logging_page()
-    elif page == 'Attendance Statistics':
-        attendance_stats_page()
-
 def attendance_logging_page():
     st.title('Employee Attendance System')
 
@@ -248,6 +241,24 @@ def attendance_logging_page():
     if not today_all_entries.empty:
         today_all_entries = today_all_entries.drop(columns=['_id', 'Arrival Photo', 'Leaving Photo'])
     st.dataframe(today_all_entries)
+
+def main():
+    st.sidebar.title('Navigation')
+    page = st.sidebar.radio('Go to', ['Attendance Logging', 'Admin'])
+
+    if page == 'Attendance Logging':
+        attendance_logging_page()
+    elif page == 'Admin':
+        if "logged_in" not in st.session_state:
+            st.session_state.logged_in = False
+
+        if not st.session_state.logged_in:
+            admin.login_page()
+        else:
+            attendance_stats_page()
+            if st.sidebar.button('Logout'):
+                st.session_state.logged_in = False
+                st.experimental_rerun()
 
 if __name__ == '__main__':
     main()
