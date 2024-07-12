@@ -1,4 +1,3 @@
-# app.py
 import os
 import streamlit as st
 import pandas as pd
@@ -10,7 +9,8 @@ import io
 import pymongo
 from dotenv import load_dotenv
 import pytz
-import admin  # Import the admin login script
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Load environment variables from .env file
 load_dotenv()
@@ -20,7 +20,7 @@ connection_string = os.getenv("MONGODB_CONNECTION_STRING")
 
 # Define the allowed location coordinates (latitude, longitude)
 ALLOWED_LOCATION = (34.1008979, 74.8099825)  # Example coordinates
-MAX_DISTANCE_KM = 0.5  # Maximum allowed distance in kilometers
+MAX_DISTANCE_KM = 1.0  # Maximum allowed distance in kilometers
 
 # Connect to MongoDB
 client = pymongo.MongoClient(connection_string)
@@ -35,7 +35,7 @@ def get_current_ist_time():
 
 def save_image(img):
     image = Image.open(img)
-    image = image.resize((150, 150))  # Resize to 150x150 pixels
+    image = image.resize((250, 250))  # Resize to 150x150 pixels
     img_byte_arr = io.BytesIO()
     image.save(img_byte_arr, format='PNG')
     return img_byte_arr.getvalue()
@@ -146,29 +146,209 @@ def calculate_attendance_stats(df, employee, month):
     
     return pd.DataFrame(stats)
 
-def attendance_stats_page():
-    st.title('Attendance Statistics')
-    
-    df = load_attendance()
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+
+def authenticate(username, password):
+    return username == ADMIN_USERNAME and password == ADMIN_PASSWORD
+
+def view_attendance(df, start_date, end_date, employee, attributes):
     df['Date'] = pd.to_datetime(df['Date'])
+    df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
     
+    if employee != 'All':
+        df = df[df['Name'] == employee]
+    
+    # Calculate 'Days Present' if selected
+    if 'Days Present' in attributes:
+        df['Days Present'] = df.groupby('Name')['Date'].transform('nunique')
+    
+    return df[['Name', 'Date'] + attributes]
+
+def calculate_hours_present(arrival_time, leaving_time):
+    try:
+        # Parse arrival and leaving times in 12-hour format with AM/PM
+        arrival = datetime.strptime(arrival_time, '%I:%M %p')
+        leaving = datetime.strptime(leaving_time, '%I:%M %p')
+
+        # Calculate difference in hours
+        difference = (leaving - arrival).total_seconds() / 3600
+
+        # Round to two decimal places
+        hours_present = round(difference, 2)
+
+        return hours_present
+
+    except ValueError as e:
+        print(f"Error parsing time: {e}")
+        return None
+
+def update_attendance_page():
+    st.title('Update Attendance Records')
+
+    df = load_attendance()
+    employees = list(df['Name'].unique())
+    selected_employee = st.selectbox('Select Employee to Update', employees)
+
+    selected_date = st.date_input('Select Date', date.today())
+    query_date = datetime.combine(selected_date, datetime.min.time())
+
+    # Fetch attendance record for selected employee and date
+    entry = attendance_collection.find_one({"Name": selected_employee, "Date": query_date})
+
+    if entry:
+        st.subheader('Update Details:')
+        new_arrival_time = st.text_input('Arrival Time', value=entry['Arrival Time'])
+        new_leaving_time = st.text_input('Leaving Time', value=entry['Leaving Time'])
+
+        if st.button('Update'):
+            # Calculate new hours present
+            hours_present = calculate_hours_present(new_arrival_time, new_leaving_time)
+
+            if hours_present is not None:
+                # Update MongoDB record with Hours Present
+                result = attendance_collection.update_one(
+                    {"_id": entry["_id"]},
+                    {
+                        "$set": {
+                            'Arrival Time': new_arrival_time,
+                            'Leaving Time': new_leaving_time,
+                            'Hours Present': hours_present
+                        }
+                    }
+                )
+                if result.modified_count > 0:
+                    st.success('Attendance record updated successfully.')
+                else:
+                    st.warning('Failed to update attendance record.')
+            else:
+                st.error('Error calculating hours present. Please check your time inputs.')
+
+    else:
+        st.warning('No record found for the selected employee and date.')
+
+def visualize_attendance(df):
+    st.title('Visualize Attendance Records')
+    
+    # Date range selection
+    col1, col2 = st.columns(2)
+    start_date = pd.to_datetime(col1.date_input("Start Date", min_value=df['Date'].min().date(), max_value=df['Date'].max().date(), value=df['Date'].min().date()))
+    end_date = pd.to_datetime(col2.date_input("End Date", min_value=df['Date'].min().date(), max_value=df['Date'].max().date(), value=df['Date'].max().date()))
+    
+    # Employee selection
     employees = ['All'] + list(df['Name'].unique())
     selected_employee = st.selectbox('Select Employee', employees)
     
-    months = ['All'] + [d.strftime('%B %Y') for d in pd.date_range(start=df['Date'].min(), end=df['Date'].max(), freq='MS')]
-    selected_month = st.selectbox('Select Month', months)
+    if selected_employee == 'All':
+        df_filtered = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
+    else:
+        df_filtered = df[(df['Date'] >= start_date) & (df['Date'] <= end_date) & (df['Name'] == selected_employee)]
     
-    stats_df = calculate_attendance_stats(df, selected_employee, selected_month)
-    st.dataframe(stats_df)
+    if df_filtered.empty:
+        st.warning("No data available for the selected filters.")
+        return
+
+    # Visualize total hours per day or employees present per day
+    if selected_employee == 'All':
+        st.subheader('Employees Present Per Day')
+        df_grouped = df_filtered.groupby('Date')['Name'].nunique().reset_index()
+        fig_employees_per_day = px.line(df_grouped, x='Date', y='Name', title='Employees Present Per Day')
+        fig_employees_per_day.update_layout(yaxis_title='Number of Employees')
+        st.plotly_chart(fig_employees_per_day)
+    else:
+        st.subheader('Hours Present Per Day')
+        df_grouped = df_filtered.groupby('Date')['Hours Present'].sum().reset_index()
+        fig_hours_per_day = px.line(df_grouped, x='Date', y='Hours Present', title='Hours Present Per Day')
+        st.plotly_chart(fig_hours_per_day)
+
+    # Visualize hours present per employee only when all employees are selected
+    if selected_employee == 'All':
+        st.subheader('Total Hours Present Per Employee')
+        df_grouped = df_filtered.groupby('Name')['Hours Present'].sum().reset_index()
+        df_grouped = df_grouped.sort_values(by='Hours Present', ascending=False)
+        fig_hours_per_employee = px.bar(df_grouped, x='Name', y='Hours Present', title='Total Hours Present Per Employee')
+        st.plotly_chart(fig_hours_per_employee)
+
+    # Visualize arrival and leaving times
+    st.subheader('Arrival and Leaving Times')
+    fig_times = go.Figure()
+    fig_times.add_trace(go.Scatter(x=df_filtered['Date'], y=pd.to_datetime(df_filtered['Arrival Time']).dt.time, mode='markers', name='Arrival Time'))
+    fig_times.add_trace(go.Scatter(x=df_filtered['Date'], y=pd.to_datetime(df_filtered['Leaving Time']).dt.time, mode='markers', name='Leaving Time'))
+    fig_times.update_layout(title='Arrival and Leaving Times', xaxis_title='Date', yaxis_title='Time')
+    st.plotly_chart(fig_times)
+
+def attendance_stats_page():
+    st.title('Attendance Statistics')
     
-    # Export as CSV
-    csv = stats_df.to_csv(index=False)
-    st.download_button(
-        label="Download CSV",
-        data=csv,
-        file_name="attendance_stats.csv",
-        mime="text/csv"
-    )
+    # Authentication
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    
+    if not authenticate(username, password):
+        st.error("Invalid username or password")
+        return
+    
+    # Admin actions
+    admin_action = st.selectbox('Select Action', ['View Attendance', 'Update Records', 'Visualize Attendance'])
+    
+    if admin_action == 'View Attendance':
+        df = load_attendance()
+        df['Date'] = pd.to_datetime(df['Date'])
+        
+        # Date range selection
+        col1, col2 = st.columns(2)
+        start_date = pd.to_datetime(col1.date_input("Start Date", min_value=df['Date'].min().date(), max_value=df['Date'].max().date(), value=df['Date'].min().date()))
+        end_date = pd.to_datetime(col2.date_input("End Date", min_value=df['Date'].min().date(), max_value=df['Date'].max().date(), value=df['Date'].max().date()))
+        
+        # Employee selection
+        employees = ['All'] + list(df['Name'].unique())
+        selected_employee = st.selectbox('Select Employee', employees)
+        
+        if selected_employee == 'All':
+            stats_df = calculate_attendance_stats(df, selected_employee, 'All')
+            st.dataframe(stats_df)
+
+            # Export as CSV
+            if st.button('Export as CSV'):
+                csv = stats_df.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name="attendance_stats.csv",
+                    mime="text/csv"
+                )
+        else:
+            # Attribute selection
+            available_attributes = ['Hours Present', 'Arrival Time', 'Leaving Time', 'Days Present']
+            selected_attributes = st.multiselect('Select Attributes', available_attributes, default=['Hours Present'])
+            
+            if not selected_attributes:
+                st.error('Please select at least one attribute.')
+                return
+            
+            # View attendance
+            if st.button('View Attendance'):
+                result_df = view_attendance(df, start_date, end_date, selected_employee, selected_attributes)
+                st.dataframe(result_df)
+                
+            # Export as CSV
+            if st.button('Export as CSV'):
+                result_df = view_attendance(df, start_date, end_date, selected_employee, selected_attributes)
+                csv = result_df.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name="attendance_stats.csv",
+                    mime="text/csv"
+                )
+    
+    elif admin_action == 'Update Records':
+        update_attendance_page()
+    
+    elif admin_action == 'Visualize Attendance':
+        df = load_attendance()
+        df['Date'] = pd.to_datetime(df['Date'])
+        visualize_attendance(df)
 
 def attendance_logging_page():
     st.title('Employee Attendance System')
@@ -244,21 +424,13 @@ def attendance_logging_page():
 
 def main():
     st.sidebar.title('Navigation')
-    page = st.sidebar.radio('Go to', ['Attendance Logging', 'Admin'])
-
+    page = st.sidebar.radio('Go to', ['Attendance Logging', 'Attendance Statistics'])
+    
     if page == 'Attendance Logging':
         attendance_logging_page()
-    elif page == 'Admin':
-        if "logged_in" not in st.session_state:
-            st.session_state.logged_in = False
-
-        if not st.session_state.logged_in:
-            admin.login_page()
-        else:
-            attendance_stats_page()
-            if st.sidebar.button('Logout'):
-                st.session_state.logged_in = False
-                st.experimental_rerun()
+    elif page == 'Attendance Statistics':
+        attendance_stats_page()
 
 if __name__ == '__main__':
     main()
+
