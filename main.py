@@ -26,6 +26,7 @@ MAX_DISTANCE_KM = 1.0  # Maximum allowed distance in kilometers
 client = pymongo.MongoClient(connection_string)
 db = client["attendance_db"]
 attendance_collection = db["attendance"]
+settings_collection = db["settings"]
 
 # Define IST timezone
 IST = pytz.timezone('Asia/Kolkata')
@@ -277,19 +278,48 @@ def visualize_attendance(df):
     fig_times.update_layout(title='Arrival and Leaving Times', xaxis_title='Date', yaxis_title='Time')
     st.plotly_chart(fig_times)
 
+def get_location_restriction():
+    setting = settings_collection.find_one({"setting": "location_restriction"})
+    if setting:
+        return setting["value"]
+    else:
+        # Default to True if setting is not found
+        settings_collection.insert_one({"setting": "location_restriction", "value": True})
+        return True
+
+def set_location_restriction(value):
+    settings_collection.update_one(
+        {"setting": "location_restriction"},
+        {"$set": {"value": value}},
+        upsert=True
+    )
+
 def attendance_stats_page():
     st.title('Attendance Statistics')
     
     # Authentication
-    username = st.sidebar.text_input("Username")
-    password = st.sidebar.text_input("Password", type="password")
-    
-    if not authenticate(username, password):
-        st.error("Invalid username or password")
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.sidebar.subheader("Admin Login")
+        username = st.sidebar.text_input("Username")
+        password = st.sidebar.text_input("Password", type="password")
+        if st.sidebar.button("Login"):
+            if authenticate(username, password):
+                st.session_state.authenticated = True
+                st.experimental_rerun()
+            else:
+                st.sidebar.error("Invalid username or password")
         return
+
+    # Logout button
+    if st.sidebar.button("Logout"):
+        st.session_state.authenticated = False
+        st.experimental_rerun()
     
     # Admin actions
-    admin_action = st.selectbox('Select Action', ['View Attendance', 'Update Records', 'Visualize Attendance'])
+    admin_action = st.selectbox('Select Action', ['View Attendance', 'Update Records', 'Visualize Attendance', 'Manage Location Restriction'])
     
     if admin_action == 'View Attendance':
         df = load_attendance()
@@ -350,21 +380,32 @@ def attendance_stats_page():
         df['Date'] = pd.to_datetime(df['Date'])
         visualize_attendance(df)
 
+    elif admin_action == 'Manage Location Restriction':
+        st.title("Manage Location Restriction")
+        location_restriction = st.checkbox("Enable Location Restriction", value=get_location_restriction())
+
+        if st.button("Update Restriction"):
+            set_location_restriction(location_restriction)
+            st.success(f"Location restriction {'enabled' if location_restriction else 'disabled'} successfully.")
+
 def attendance_logging_page():
     st.title('Employee Attendance System')
 
     # Get user's location
     location = get_geolocation()
 
-    if location is None:
-        st.warning('Waiting for location data...')
-        return
+    location_restriction = get_location_restriction()
 
-    lat, lon = location['coords']['latitude'], location['coords']['longitude']
+    if location_restriction:
+        if location is None:
+            st.warning('Waiting for location data...')
+            return
 
-    if not is_within_allowed_location(lat, lon):
-        st.error('You are not within the allowed location to log your attendance.')
-        return
+        lat, lon = location['coords']['latitude'], location['coords']['longitude']
+
+        if not is_within_allowed_location(lat, lon):
+            st.error('You are not within the allowed location to log your attendance.')
+            return
 
     employees = ['Muzamil Javeed', 'Asim Sumair', 'Arsalan Ahmad', 'Mohammad Unaib', 'Talib Shabir', 'Syed Owais Bashir', 'Ovais Tariq Lone', 'Owais Mir', 'Numair', 'Jehangir','Ingila Irshad', 'Zaineb Khursheed', 'Tabarak', 'Navreen']
     selected_employee = st.selectbox('Select Employee', employees)
@@ -433,4 +474,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
