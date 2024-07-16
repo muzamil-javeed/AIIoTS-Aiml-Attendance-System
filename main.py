@@ -20,7 +20,7 @@ connection_string = os.getenv("MONGODB_CONNECTION_STRING")
 
 # Define the allowed location coordinates (latitude, longitude)
 ALLOWED_LOCATION = (34.1008979, 74.8099825)  # Example coordinates
-MAX_DISTANCE_KM = 10000.0 # Maximum allowed distance in kilometers
+MAX_DISTANCE_KM = 1.0 # Maximum allowed distance in kilometers
 
 # Connect to MongoDB
 client = pymongo.MongoClient(connection_string)
