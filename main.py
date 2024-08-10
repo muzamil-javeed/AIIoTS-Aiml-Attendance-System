@@ -136,7 +136,7 @@ def calculate_attendance_stats(df, employee, month):
         # Adjust for allowed leave
         if leaves_taken > 1:
             total_days -= (leaves_taken - 1)
-            total_hours -= (leaves_taken - 1) * 8
+            # total_hours -= (leaves_taken - 1) * 8
         
         stats.append({
             'Name': name,
