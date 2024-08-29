@@ -308,7 +308,7 @@ def attendance_stats_page():
         if st.sidebar.button("Login"):
             if authenticate(username, password):
                 st.session_state.authenticated = True
-                st.experimental_rerun()
+                st.rerun
             else:
                 st.sidebar.error("Invalid username or password")
         return
@@ -316,7 +316,7 @@ def attendance_stats_page():
     # Logout button
     if st.sidebar.button("Logout"):
         st.session_state.authenticated = False
-        st.experimental_rerun()
+        st.rerun()
     
     # Admin actions
     admin_action = st.selectbox('Select Action', ['View Attendance', 'Update Records', 'Visualize Attendance', 'Manage Location Restriction'])
@@ -430,7 +430,7 @@ def attendance_logging_page():
                 if success:
                     st.session_state.df = load_attendance()  # Reload the updated dataframe
                     st.success(message)
-                    st.experimental_rerun()  # Force Streamlit to rerun the script
+                    st.rerun()  # Force Streamlit to rerun the script
                 else:
                     st.error(message)
     else:
@@ -449,7 +449,7 @@ def attendance_logging_page():
                     if success:
                         st.session_state.df = load_attendance()  # Reload the updated dataframe
                         st.success(message)
-                        st.experimental_rerun()  # Force Streamlit to rerun the script
+                        st.rerun()  # Force Streamlit to rerun the script
                     else:
                         st.error(message)
         else:
