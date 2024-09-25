@@ -19,7 +19,7 @@ load_dotenv()
 connection_string = os.getenv("MONGODB_CONNECTION_STRING")
 
 # Define the allowed location coordinates (latitude, longitude)
-ALLOWED_LOCATION = (34.1008979, 74.8099825)  # Example coordinates
+ALLOWED_LOCATION = (34.1008979, 74.8099825)  #coordinates
 MAX_DISTANCE_KM = 1.0 # Maximum allowed distance in kilometers
 
 # Connect to MongoDB
@@ -36,7 +36,7 @@ def get_current_ist_time():
 
 def save_image(img):
     image = Image.open(img)
-    image = image.resize((250, 250))  # Resize to 150x150 pixels
+    image = image.resize((250, 250))  # Resize to 250x250 pixels
     img_byte_arr = io.BytesIO()
     image.save(img_byte_arr, format='PNG')
     return img_byte_arr.getvalue()
