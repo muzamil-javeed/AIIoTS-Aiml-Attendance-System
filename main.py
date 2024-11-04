@@ -407,7 +407,7 @@ def attendance_logging_page():
             st.error('You are not within the allowed location to log your attendance.')
             return
 
-    employees = ['Muzamil Javeed', 'Asim Sumair', 'Arsalan Ahmad', 'Mohammad Unaib', 'Talib Shabir', 'Syed Owais Bashir', 'Ovais Tariq Lone', 'Owais Mir', 'Numair', 'Jehangir','Ingila Irshad', 'Zaineb Khursheed', 'Tabarak', 'Navreen','Syed Muntazir','Najma Fayaz','Afsa Imtiyaz','Bisma Nisar','Furkan shabir']
+    employees = ['Muzamil Javeed', 'Asim Sumair', 'Arsalan Ahmad', 'Mohammad Unaib', 'Talib Shabir', 'Syed Owais Bashir', 'Suhail Ulfath', 'Owais Mir', 'Numair', 'Jehangir','Ingila Irshad', 'Zaineb Khursheed', 'Tabarak','Syed Muntazir','Najma Fayaz','Afsa Imtiyaz','Bisma Nisar','Furkan shabir','Rafiya jan','Rehana Rashid ','Mufazila']
     selected_employee = st.selectbox('Select Employee', employees)
 
     current_date = date.today()
